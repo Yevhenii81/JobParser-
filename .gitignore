@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+
+.vs/
+*.user
+.idea/
+*.suo
+
+**/out/
+**/logs/
+
+**/appsettings.Development.json
