@@ -4,7 +4,6 @@
     {
         private readonly HashSet<string> _exclusions;
         private readonly ILogger<ExclusionFilter> _logger;
-
         public ExclusionFilter(string exclusionsFilePath, ILogger<ExclusionFilter> logger)
         {
             _logger = logger;
@@ -12,7 +11,6 @@
 
             LoadExclusions(exclusionsFilePath);
         }
-
         private void LoadExclusions(string filePath)
         {
             try
@@ -39,7 +37,6 @@
                 _logger.LogError(ex, "Ошибка загрузки слов-исключений");
             }
         }
-
         public bool ContainsExclusions(string text)
         {
             if (string.IsNullOrWhiteSpace(text))

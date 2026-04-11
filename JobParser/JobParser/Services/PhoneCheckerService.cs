@@ -14,7 +14,6 @@ namespace JobParser.Services
         private readonly ILogger<PhoneCheckerService> _logger;
         private readonly IConfiguration _configuration;
         private readonly PhoneNumberUtil _phoneUtil;
-
         private readonly bool _useExternalApi;
         private readonly string? _apiUrl;
 
@@ -36,7 +35,7 @@ namespace JobParser.Services
             if (_useExternalApi && string.IsNullOrEmpty(_apiUrl))
             {
                 _logger.LogWarning(
-                    "UseExternalPhoneApi is enabled but PhoneCheckApiUrl is not configured. Falling back to local database.");
+                    "UseExternalPhoneApi включен, но PhoneNumberUrl не настроен. Используется локальная БД.");
                 _useExternalApi = false;
             }
 
@@ -46,7 +45,6 @@ namespace JobParser.Services
 
             _logger.LogInformation("PhoneCheckerService mode: {Mode}", mode);
         }
-
         public string? ValidateAndNormalize(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
@@ -63,34 +61,30 @@ namespace JobParser.Services
 
                 if (!_phoneUtil.IsValidNumber(phoneNumber))
                 {
-                    _logger.LogDebug("Invalid phone: {Phone}", input);
+                    _logger.LogDebug("Невалидный номер: {Phone}", input);
                     return null;
                 }
-
                 return _phoneUtil.Format(phoneNumber, PhoneNumberFormat.E164);
             }
             catch (NumberParseException ex)
             {
-                _logger.LogDebug(ex, "Phone parse error: {Phone}", input);
+                _logger.LogDebug(ex, "Ошибка парсинга номера: {Phone}", input);
                 return null;
             }
         }
-
         public async Task<bool> PhoneExistsAsync(string phoneNumber)
         {
             var normalizedPhone = ValidateAndNormalize(phoneNumber);
 
             if (normalizedPhone == null)
             {
-                _logger.LogWarning("Invalid phone skipped: {Phone}", phoneNumber);
+                _logger.LogWarning("Невалидный номер пропущен: {Phone}", phoneNumber);
                 return true;
             }
-
             return _useExternalApi
                 ? await CheckViaExternalApiAsync(normalizedPhone)
                 : await CheckViaLocalDatabaseAsync(normalizedPhone);
         }
-
         private async Task<bool> CheckViaExternalApiAsync(string normalizedPhone)
         {
             try
@@ -98,7 +92,6 @@ namespace JobParser.Services
                 var requestBody = new { PhoneNumber = normalizedPhone };
                 var json = JsonSerializer.Serialize(requestBody);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-
                 var response = await _httpClient!.PostAsync(_apiUrl, content);
 
                 if (response.StatusCode == System.Net.HttpStatusCode.Created)
@@ -112,20 +105,22 @@ namespace JobParser.Services
 
                 return false;
             }
-            catch (HttpRequestException)
+            catch (HttpRequestException ex)
             {
+                _logger.LogWarning(ex, "API недоступен, используется локальная БД");
                 return await CheckViaLocalDatabaseAsync(normalizedPhone);
             }
-            catch (TaskCanceledException)
+            catch (TaskCanceledException ex)
             {
+                _logger.LogWarning(ex, "Timeout API, используется локальная БД");
                 return await CheckViaLocalDatabaseAsync(normalizedPhone);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger.LogError(ex, "Ошибка проверки через API");
                 return await CheckViaLocalDatabaseAsync(normalizedPhone);
             }
         }
-
         private async Task<bool> CheckViaLocalDatabaseAsync(string normalizedPhone)
         {
             try
@@ -149,12 +144,12 @@ namespace JobParser.Services
             {
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogError(ex, "Ошибка работы с локальной БД");
                 return false;
             }
         }
-
         public async Task<bool> AnyPhoneExistsAsync(List<string> phoneNumbers)
         {
             if (phoneNumbers == null || phoneNumbers.Count == 0)
@@ -165,10 +160,8 @@ namespace JobParser.Services
                 if (await PhoneExistsAsync(phone))
                     return true;
             }
-
             return false;
         }
-
         public string? GetRegion(string phoneNumber)
         {
             try
@@ -179,7 +172,6 @@ namespace JobParser.Services
                     parsed = _phoneUtil.Parse(phoneNumber, null);
                 else
                     parsed = _phoneUtil.Parse(phoneNumber, "US");
-
                 return _phoneUtil.GetRegionCodeForNumber(parsed);
             }
             catch
@@ -187,7 +179,6 @@ namespace JobParser.Services
                 return null;
             }
         }
-
         private bool IsUniqueConstraintViolation(DbUpdateException ex)
         {
             return ex.InnerException?.Message.Contains("duplicate key") == true ||

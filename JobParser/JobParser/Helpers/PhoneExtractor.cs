@@ -8,10 +8,8 @@ namespace JobParser.Helpers
             @"\+?[\d][\d\s\-\.\(\)]{7,20}[\d]",
             RegexOptions.Compiled
         );
-
         private const int MinDigits = 7;
         private const int MaxDigits = 15;
-
         public static List<string> ExtractPhones(string text)
         {
             if (string.IsNullOrWhiteSpace(text))
@@ -31,10 +29,8 @@ namespace JobParser.Helpers
                 if (!phones.Contains(cleaned))
                     phones.Add(cleaned);
             }
-
             return phones.ToList();
         }
-
         private static string CleanPhone(string phone)
         {
             return Regex.Replace(phone, @"[^\d+]", "").Trim();

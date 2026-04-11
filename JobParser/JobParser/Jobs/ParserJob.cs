@@ -7,13 +7,11 @@ namespace JobParser.Jobs
     {
         private readonly ParserService _parserService;
         private readonly ILogger<ParserJob> _logger;
-
         public ParserJob(ParserService parserService, ILogger<ParserJob> logger)
         {
             _parserService = parserService;
             _logger = logger;
         }
-
         public async Task Execute(IJobExecutionContext context)
         {
             _logger.LogInformation("Запуск запланированого парсингу о {Time}", DateTime.Now);

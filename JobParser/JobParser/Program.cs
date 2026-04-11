@@ -6,6 +6,7 @@ using JobParser.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Quartz;
 using Serilog;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,22 +25,33 @@ builder.Host.UseSerilog();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-builder.Services.AddHttpClient<AmountWorkParser>(client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(30);
-    client.DefaultRequestHeaders.Add("User-Agent",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36");
-    client.DefaultRequestHeaders.Add("Accept",
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
-    client.DefaultRequestHeaders.Add("Accept-Language",
-        "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7");
-    client.DefaultRequestHeaders.Add("Connection", "keep-alive");
-    client.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1");
-    client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "document");
-    client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "navigate");
-    client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "none");
-    client.DefaultRequestHeaders.Add("Cache-Control", "max-age=0");
-});
+builder.Services.AddHttpClient<AmountWorkParser>()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        UseCookies = true,
+        CookieContainer = new CookieContainer(),
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+        AllowAutoRedirect = true
+    })
+    .ConfigureHttpClient(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+        client.DefaultRequestHeaders.Add("User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+        client.DefaultRequestHeaders.Add("Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
+        client.DefaultRequestHeaders.Add("Accept-Language",
+            "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7");
+        client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
+        client.DefaultRequestHeaders.Add("DNT", "1");
+        client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+        client.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "document");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "navigate");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "none");
+        client.DefaultRequestHeaders.Add("Sec-Fetch-User", "?1");
+        client.DefaultRequestHeaders.Add("Cache-Control", "max-age=0");
+    });
 
 builder.Services.AddHttpClient<LayboardParser>(client =>
 {
@@ -107,12 +119,16 @@ using (var scope = app.Services.CreateScope())
     {
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await context.Database.MigrateAsync();
-        var count = await context.PhoneNumbers.CountAsync();
-        Log.Information("БД готова. Номеров: {Count}", count);
+
+        var phoneCount = await context.PhoneNumbers.CountAsync();
+        var processedCount = await context.ProcessedLeads.CountAsync();
+
+        Log.Information("Database ready. Phones: {PhoneCount}, Processed URLs: {ProcessedCount}",
+            phoneCount, processedCount);
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "Ошибка подключения к БД");
+        Log.Error(ex, "Database connection error");
     }
 }
 
@@ -143,7 +159,8 @@ app.MapGet("/", () => Results.Ok(new
         swagger = "GET /swagger"
     }
 }))
-.WithName("Info").WithTags("Info").WithOpenApi();
+.WithName("Info")
+.WithTags("Info");
 
 app.MapPost("/api/parser/run", async (ParserService parserService) =>
 {
@@ -153,19 +170,20 @@ app.MapPost("/api/parser/run", async (ParserService parserService) =>
         return Results.Ok(new
         {
             success = true,
-            message = "Парсинг завершен",
-            timestamp = DateTime.Now
+            message = "Parsing completed",
+            timestamp = DateTime.UtcNow
         });
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "Ошибка запуска парсера");
+        Log.Error(ex, "Parser start error");
         return Results.Problem(
             detail: ex.Message,
-            title: "Ошибка выполнения парсинга");
+            title: "Parsing execution error");
     }
 })
-.WithName("RunParser").WithTags("Parser").WithOpenApi();
+.WithName("RunParser")
+.WithTags("Parser");
 
 app.MapGet("/api/stats", async (AppDbContext context) =>
 {
@@ -179,10 +197,11 @@ app.MapGet("/api/stats", async (AppDbContext context) =>
         totalPhones = total,
         todayPhones = today,
         database = "jobparser_db",
-        timestamp = DateTime.Now
+        timestamp = DateTime.UtcNow
     });
 })
-.WithName("GetStats").WithTags("Stats").WithOpenApi();
+.WithName("GetStats")
+.WithTags("Stats");
 
-Log.Information("JobParser v2.0 запущен");
+Log.Information("JobParser v2.0 started");
 app.Run();
