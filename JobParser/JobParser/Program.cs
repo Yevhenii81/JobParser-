@@ -203,5 +203,5 @@ app.MapGet("/api/stats", async (AppDbContext context) =>
 .WithName("GetStats")
 .WithTags("Stats");
 
-Log.Information("JobParser v2.0 started");
+Log.Information("JobParser started");
 app.Run();
