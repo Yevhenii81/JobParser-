@@ -1,4 +1,4 @@
-JobParser v2.0
+JobParser
 
 Описание
 
