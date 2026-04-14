@@ -131,36 +131,67 @@ UpdatedAt
 Структура проекта
 
 JobParser/
+
 ├── Data/
+
 │   └── AppDbContext.cs
+
 ├── Helpers/
+
 │   ├── ExclusionFilter.cs
+
 │   └── ParserHelper.cs
+
 ├── Jobs/
+
 │   └── ParserJob.cs
+
 ├── Migrations/
+
 ├── Models/
+
 │   ├── JobLead.cs
+
 │   ├── ProcessedLead.cs
+
 │   ├── ParserProgress.cs
+
 │   └── ParserSettings.cs
+
 ├── Repositories/
+
 │   ├── ProgressRepository.cs
+
 │   └── ProcessedUrlsRepository.cs
+
 ├── Services/
+
 │   ├── Interfaces/
+
 │   │   └── ISiteParser.cs
+
 │   ├── AmountWorkParser.cs
+
 │   ├── LayboardParser.cs
+
 │   ├── ParserService.cs
+
 │   ├── PhoneCheckerService.cs
+
 │   ├── HtmlParserService.cs
+
 │   └── CsvExportService.cs
+
 ├── logs/
+
 ├── out/
+
 ├── appsettings.json
+
 ├── exclusions.txt
+
 ├── Program.cs
+
 └── README.md
 
 Конфигурация
