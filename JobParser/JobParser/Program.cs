@@ -1,6 +1,7 @@
 ﻿using JobParser.Data;
 using JobParser.Helpers;
 using JobParser.Jobs;
+using JobParser.Repositories;
 using JobParser.Services;
 using JobParser.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -40,17 +41,8 @@ builder.Services.AddHttpClient<AmountWorkParser>()
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
         client.DefaultRequestHeaders.Add("Accept",
             "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
-        client.DefaultRequestHeaders.Add("Accept-Language",
-            "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7");
+        client.DefaultRequestHeaders.Add("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7");
         client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
-        client.DefaultRequestHeaders.Add("DNT", "1");
-        client.DefaultRequestHeaders.Add("Connection", "keep-alive");
-        client.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Dest", "document");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Mode", "navigate");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-Site", "none");
-        client.DefaultRequestHeaders.Add("Sec-Fetch-User", "?1");
-        client.DefaultRequestHeaders.Add("Cache-Control", "max-age=0");
     });
 
 builder.Services.AddHttpClient<LayboardParser>(client =>
@@ -60,8 +52,7 @@ builder.Services.AddHttpClient<LayboardParser>(client =>
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36");
     client.DefaultRequestHeaders.Add("Accept",
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-    client.DefaultRequestHeaders.Add("Accept-Language",
-        "uk-UA,uk;q=0.9,en-US;q=0.8");
+    client.DefaultRequestHeaders.Add("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8");
 });
 
 builder.Services.AddHttpClient<PhoneCheckerService>(client =>
@@ -79,15 +70,20 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title = "JobParser API",
         Version = "v2.0",
-        Description = "Парсер вакансий с проверкой номеров через PostgreSQL"
+        Description = "Парсер вакансий с проверкой номеров через PhoneNumberAPI"
     });
 });
 
-builder.Services.AddScoped<ISiteParser, AmountWorkParser>();
-builder.Services.AddScoped<ISiteParser, LayboardParser>();
+builder.Services.AddScoped<ProgressRepository>();
+builder.Services.AddScoped<ProcessedUrlsRepository>();
+
+builder.Services.AddScoped<HtmlParserService>();
 builder.Services.AddScoped<PhoneCheckerService>();
 builder.Services.AddScoped<CsvExportService>();
 builder.Services.AddScoped<ParserService>();
+
+builder.Services.AddScoped<ISiteParser, AmountWorkParser>();
+builder.Services.AddScoped<ISiteParser, LayboardParser>();
 
 builder.Services.AddSingleton(sp =>
 {
@@ -100,15 +96,17 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddQuartz(q =>
 {
     q.UseMicrosoftDependencyInjectionJobFactory();
+
     var jobKey = new JobKey("ParserJob");
     q.AddJob<ParserJob>(opts => opts.WithIdentity(jobKey));
+
     q.AddTrigger(opts => opts
         .ForJob(jobKey)
         .WithIdentity("ParserJob-trigger")
-        .WithCronSchedule(
-            builder.Configuration["Quartz:CronSchedule"] ?? "0 0 */6 * * ?")
+        .WithCronSchedule(builder.Configuration["Quartz:CronSchedule"] ?? "0 0 */6 * * ?")
     );
 });
+
 builder.Services.AddQuartzHostedService(q => q.WaitForJobsToComplete = true);
 
 var app = builder.Build();
@@ -120,11 +118,9 @@ using (var scope = app.Services.CreateScope())
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await context.Database.MigrateAsync();
 
-        var phoneCount = await context.PhoneNumbers.CountAsync();
         var processedCount = await context.ProcessedLeads.CountAsync();
 
-        Log.Information("Database ready. Phones: {PhoneCount}, Processed URLs: {ProcessedCount}",
-            phoneCount, processedCount);
+        Log.Information("Database ready. Processed URLs: {ProcessedCount}", processedCount);
     }
     catch (Exception ex)
     {
@@ -132,15 +128,27 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-if (app.Environment.IsDevelopment())
+var phoneApiUrl = builder.Configuration["ParserSettings:PhoneCheckApiUrl"];
+try
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "JobParser API v2.0");
-        c.RoutePrefix = "swagger";
-    });
+    using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+    var baseUrl = new Uri(phoneApiUrl!).GetLeftPart(UriPartial.Authority);
+    await httpClient.GetAsync(baseUrl);
+    Log.Information("PhoneNumberAPI доступен: {Url}", baseUrl);
 }
+catch
+{
+    Log.Error("PhoneNumberAPI недоступен по адресу {Url}. Запустите PhoneNumberAPI первым!", phoneApiUrl);
+    Log.Error("Завершение работы JobParser...");
+    Environment.Exit(1);
+}
+
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "JobParser API v2.0");
+    c.RoutePrefix = "swagger";
+});
 
 app.UseHttpsRedirection();
 app.UseAuthorization();
@@ -170,16 +178,17 @@ app.MapPost("/api/parser/run", async (ParserService parserService) =>
         return Results.Ok(new
         {
             success = true,
-            message = "Parsing completed",
+            message = "Парсинг завершён",
             timestamp = DateTime.UtcNow
         });
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "Parser start error");
+        Log.Error(ex, "Ошибка запуска парсера");
         return Results.Problem(
             detail: ex.Message,
-            title: "Parsing execution error");
+            title: "Ошибка выполнения парсинга"
+        );
     }
 })
 .WithName("RunParser")
@@ -187,15 +196,22 @@ app.MapPost("/api/parser/run", async (ParserService parserService) =>
 
 app.MapGet("/api/stats", async (AppDbContext context) =>
 {
-    var total = await context.PhoneNumbers.CountAsync();
-    var today = await context.PhoneNumbers
-        .Where(p => p.CreatedAt.Date == DateTime.UtcNow.Date)
-        .CountAsync();
+    var processedCount = await context.ProcessedLeads.CountAsync();
+
+    var sourceStats = await context.ProcessedLeads
+        .GroupBy(p => p.Source)
+        .Select(g => new
+        {
+            Source = g.Key,
+            Count = g.Count(),
+            Latest = g.Max(p => p.ProcessedAt)
+        })
+        .ToListAsync();
 
     return Results.Ok(new
     {
-        totalPhones = total,
-        todayPhones = today,
+        totalProcessedUrls = processedCount,
+        bySource = sourceStats,
         database = "jobparser_db",
         timestamp = DateTime.UtcNow
     });
@@ -203,5 +219,25 @@ app.MapGet("/api/stats", async (AppDbContext context) =>
 .WithName("GetStats")
 .WithTags("Stats");
 
-Log.Information("JobParser v2.0 started");
+app.MapGet("/api/progress", async (AppDbContext context) =>
+{
+    var progress = await context.ParserProgress
+        .Select(p => new
+        {
+            p.Source,
+            p.LastProcessedPage,
+            p.UpdatedAt
+        })
+        .ToListAsync();
+
+    return Results.Ok(new
+    {
+        progress,
+        timestamp = DateTime.UtcNow
+    });
+})
+.WithName("GetProgress")
+.WithTags("Stats");
+
+Log.Information("JobParser запущен");
 app.Run();

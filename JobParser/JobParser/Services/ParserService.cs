@@ -39,7 +39,6 @@ namespace JobParser.Services
             _stopwatch.Start();
 
             var allLeads = new List<JobLead>();
-            var regionStats = new Dictionary<string, int>();
             var sourceStats = new Dictionary<string, int>();
             var stats = new ParseStats();
 
@@ -59,7 +58,6 @@ namespace JobParser.Services
 
                 stats.Total = allLeads.Count;
                 _logger.LogInformation("Всего объявлений: {Count}", allLeads.Count);
-
                 var validLeads = new List<JobLead>();
 
                 foreach (var lead in allLeads)
@@ -70,7 +68,7 @@ namespace JobParser.Services
                         break;
                     }
 
-                    var result = await ProcessLeadAsync(lead, stats, regionStats);
+                    var result = await ProcessLeadAsync(lead, stats);
 
                     if (result.isValid)
                     {
@@ -90,7 +88,7 @@ namespace JobParser.Services
 
                 stats.Saved = validLeads.Count;
                 _stopwatch.Stop();
-                LogStatistics(stats, regionStats, sourceStats);
+                LogStatistics(stats, sourceStats);
                 await ExportLeadsAsync(validLeads);
             }
             catch (Exception ex)
@@ -102,8 +100,7 @@ namespace JobParser.Services
         }
         private async Task<(bool isValid, JobLead? lead)> ProcessLeadAsync(
             JobLead lead,
-            ParseStats stats,
-            Dictionary<string, int> regionStats)
+            ParseStats stats)
         {
             try
             {
@@ -123,31 +120,8 @@ namespace JobParser.Services
                     return (false, null);
                 }
 
-                var validPhones = new List<string>();
-
-                foreach (var phone in lead.PhoneNumbers)
-                {
-                    var normalized = _phoneChecker.ValidateAndNormalize(phone);
-
-                    if (normalized != null)
-                    {
-                        validPhones.Add(normalized);
-
-                        var region = _phoneChecker.GetRegion(normalized) ?? "Unknown";
-                        regionStats[region] = regionStats.GetValueOrDefault(region, 0) + 1;
-                    }
-                }
-
-                if (validPhones.Count == 0)
-                {
-                    stats.InvalidPhones++;
-                    return (false, null);
-                }
-
-                validPhones = validPhones.Distinct().ToList();
+                var validPhones = lead.PhoneNumbers.Distinct().ToList();
                 lead.PhoneNumbers = validPhones;
-                lead.Region = _phoneChecker.GetRegion(validPhones.First());
-
                 bool exists = await _phoneChecker.AnyPhoneExistsAsync(validPhones);
 
                 if (exists)
@@ -155,6 +129,7 @@ namespace JobParser.Services
                     stats.Duplicates++;
                     return (false, null);
                 }
+
                 return (true, lead);
             }
             catch (Exception ex)
@@ -163,7 +138,7 @@ namespace JobParser.Services
                 return (false, null);
             }
         }
-        private void LogStatistics(ParseStats stats, Dictionary<string, int> regionStats, Dictionary<string, int> sourceStats)
+        private void LogStatistics(ParseStats stats, Dictionary<string, int> sourceStats)
         {
             _logger.LogInformation("Итоги парсинга:");
             _logger.LogInformation(
@@ -182,15 +157,6 @@ namespace JobParser.Services
                 foreach (var (source, count) in sourceStats.OrderByDescending(x => x.Value))
                 {
                     _logger.LogInformation("{Source}: {Count}", source, count);
-                }
-            }
-
-            if (regionStats.Count > 0)
-            {
-                _logger.LogInformation("По регионам:");
-                foreach (var (region, count) in regionStats.OrderByDescending(x => x.Value).Take(10))
-                {
-                    _logger.LogInformation("{Region}: {Count}", region, count);
                 }
             }
         }

@@ -32,7 +32,7 @@ namespace JobParser.Services
             try
             {
                 var timestamp = DateTime.Now.ToString("yyyy.MM.dd_HH.mm");
-                var fileName = $"[{timestamp}]_leads.csv";
+                var fileName = $"{timestamp}_leads.csv";
                 var filePath = Path.Combine(_outputFolder, fileName);
                 var config = new CsvConfiguration(CultureInfo.InvariantCulture)
                 {
