@@ -4,282 +4,210 @@ JobParser
 
 Проект состоит из двух частей:
 
-PhoneNumberApi (API проверки телефонов)
+1. PhoneNumberApi (API проверки телефонов)
 
-Хранит телефоны в PostgreSQL и отвечает на запросы проверки номера.
+Хранит телефоны в PostgreSQL
 
-Логика: если номер новый — сохраняет его и возвращает статус Created (201). Если номер уже есть — возвращает Conflict (409).
+Отвечает на запросы проверки номера
 
-JobParser (парсер вакансий)
+Логика:
 
-Собирает объявления с сайтов, вытягивает контакты (телефоны, email), фильтрует по списку исключений, проверяет телефоны через PhoneNumberApi и сохраняет валидные лиды в CSV.
+Если номер новый -> сохраняет и возвращает 201 Created
 
-Для AmountWork используется Selenium, потому что сайт блокирует обычные HTTP-запросы.
+Если номер уже есть -> возвращает 409 Conflict
+
+2. JobParser (парсер вакансий)
+
+Собирает объявления с сайтов
+
+Извлекает контакты (телефоны, email)
+
+Фильтрует по списку исключений
+
+Проверяет телефоны через PhoneNumberApi
+
+Сохраняет валидные лиды в CSV
+
+Для AmountWork используется Selenium, так как сайт блокирует обычные HTTP-запросы
 
 Источники
 
-AmountWork: https://amountwork.com/ua/rabota/ssha/voditel (в приоритете, работает через Selenium)
+AmountWork: https://amountwork.com/ua/rabota/ssha/voditel(приоритетный, работает через Selenium)
 
-Layboard: https://layboard.com/ua/vakansii/ssha (работает через HttpClient)
+Layboard: https://layboard.com/ua/vakansii/ssha(работает через HttpClient)
 
-Как работает фильтрация и дедупликация
+Фильтрация и дедупликация
 
-Из объявления извлекаются все телефоны и email
+Из объявления извлекаются телефоны и email
 
-Номера нормализуются в формат E164 (например, +17794278752)
+Телефоны очищаются от мусора (даты, зарплаты и т.д.)
 
-Каждый номер проверяется через PhoneNumberApi:
+Пример: 20012026, 46004900 — удаляются
 
-201 Created: номера не было, он записан в базу, объявление считается новым (сохраняется в CSV)
+Проверка через PhoneNumberApi:
 
-409 Conflict: номер уже был в базе, объявление отклоняется как дубликат
+201 Created -> новый номер -> сохраняется
 
-Дополнительно используется таблица processed_leads в базе JobParser, чтобы не парсить одни и те же URL повторно между запусками
-Применяется фильтр исключений из файла exclusions.txt (отсеивает объявления со словами-исключениями)
+409 Conflict -> дубликат -> отбрасывается
 
-Прогресс по страницам
+Дополнительно:
 
-AmountWork:
+Таблица processed_leads — чтобы не парсить одни и те же URL
 
-Запуск 1: Страницы 1-10 (100 объявлений)
+Файл exclusions.txt — фильтрация по словам
 
-Запуск 2: Страницы 11-20 (100 объявлений)
+Прогресс парсинга
 
-Запуск 3: Страницы 21-30 (100 объявлений)
+AmountWork
 
-При достижении конца списка начинает сначала
+Запуск 1: страницы 1–10
 
-Layboard:
+Запуск 2: страницы 11–20
 
-Запуск 1: Категории 0-4 (50 объявлений)
+Запуск 3: страницы 21–30
 
-Запуск 2: Категории 5-9 (50 объявлений)
+После конца списка → начинается заново
 
-Запуск 3: Категории 10-14 (50 объявлений)
+Layboard
 
-При достижении конца категорий начинает сначала
+Запуск 1: категории 0–4
 
-Прогресс сохраняется в таблице parser_progress и восстанавливается после перезапуска приложения.
+Запуск 2: категории 5–9
+
+Запуск 3: категории 10–14
+
+После конца -> начинается заново
+
+Прогресс хранится в таблице parser_progress.
 
 Требования
 
-.NET SDK 8.0
+.NET 8
 
 PostgreSQL 16
 
-Google Chrome (для Selenium парсинга AmountWork)
+Google Chrome (для Selenium)
 
 Базы данных
 
-Рекомендуется держать разные базы для проектов:
-
-PhoneNumberApi:
+PhoneNumberApi
 
 Database: phone_db
 
 Table: phone_numbers
 
-JobParser:
+JobParser
 
 Database: jobparser_db
 
 Tables:
 
-phone_numbers (локальное хранилище, опционально)
+processed_leads
 
-processed_leads (список обработанных URL)
+parser_progress
 
-parser_progress (прогресс сканирования страниц)
+Структура базы JobParser
 
-Структура базы данных JobParser
+processed_leads
 
-Таблица phone_numbers:
+Id
 
-Id (автоинкремент)
+Url (уникальный)
 
-Number (уникальный телефон)
+Source
 
-CreatedAt (дата добавления)
+ProcessedAt
 
-Таблица processed_leads:
+parser_progress
 
-Id (автоинкремент)
+Id
 
-Url (уникальный URL объявления)
+Source
 
-Source (имя сайта: AmountWork/Layboard)
+LastProcessedPage
 
-ProcessedAt (дата обработки)
-
-Таблица parser_progress:
-
-Id (автоинкремент)
-
-Source (имя сайта)
-
-LastProcessedPage (последняя обработанная страница/категория)
-
-UpdatedAt (дата обновления)
+UpdatedAt
 
 Структура проекта
 
-text
-
 JobParser/
-
 ├── Data/
-
-│   └── AppDbContext.cs               (контекст Entity Framework)
-
+│   └── AppDbContext.cs
 ├── Helpers/
-
-│   ├── ExclusionFilter.cs            (фильтр по словам-исключениям)
-
-│   └── PhoneExtractor.cs             (извлечение телефонов из текста)
-
+│   ├── ExclusionFilter.cs
+│   └── ParserHelper.cs
 ├── Jobs/
-
-│   └── ParserJob.cs                  (фоновая задача Quartz для автозапуска)
-
+│   └── ParserJob.cs
 ├── Migrations/
-
-│   ├── 20260409203615_InitialCreate.cs
-
-│   ├── 20260411110415_AddProcessedLeadsTable.cs
-
-│   ├── 20260411175047_AddParserProgress.cs
-
-│   └── AppDbContextModelSnapshot.cs  (миграции базы данных)
-
 ├── Models/
-
-│   ├── JobLead.cs                    (модель лида с контактами)
-
-│   ├── PhoneRecord.cs                (модель телефона)
-
-│   ├── ProcessedLead.cs              (модель обработанного URL)
-
-│   ├── ParserProgress.cs             (модель прогресса парсинга)
-
-│   └── ParserSettings.cs             (модель настроек парсера)
-
+│   ├── JobLead.cs
+│   ├── ProcessedLead.cs
+│   ├── ParserProgress.cs
+│   └── ParserSettings.cs
+├── Repositories/
+│   ├── ProgressRepository.cs
+│   └── ProcessedUrlsRepository.cs
 ├── Services/
-
 │   ├── Interfaces/
-
-│   │   └── ISiteParser.cs            (интерфейс парсера)
-
-│   ├── AmountWorkParser.cs           (парсер AmountWork через Selenium)
-
-│   ├── LayboardParser.cs             (парсер Layboard через HttpClient)
-
-│   ├── ParserService.cs              (координатор парсеров)
-
-│   ├── PhoneCheckerService.cs        (проверка телефонов через API)
-
-│   └── CsvExportService.cs           (экспорт результатов в CSV)
-
-├── logs/                             (папка с лог-файлами)
-
-│   └── parser-20260411.log           (файл логов за день)
-
-├── out/                              (папка с CSV результатами)
-
-│   └── [2026.04.11_21.02]_leads.csv  (объединенный CSV с обоих сайтов)
-
-├── appsettings.json                  (конфигурация приложения)
-
-├── exclusions.txt                    (список слов-исключений)
-
-├── Program.cs                        (точка входа)
-
+│   │   └── ISiteParser.cs
+│   ├── AmountWorkParser.cs
+│   ├── LayboardParser.cs
+│   ├── ParserService.cs
+│   ├── PhoneCheckerService.cs
+│   ├── HtmlParserService.cs
+│   └── CsvExportService.cs
+├── logs/
+├── out/
+├── appsettings.json
+├── exclusions.txt
+├── Program.cs
 └── README.md
 
-Настройка конфигов
+Конфигурация
 
-PhoneNumberApi appsettings.json
-
-JSON
-
+PhoneNumberApi
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Port=5432;Database=phone_db;Username=postgres;Password={ТВОЙ_ПАРОЛЬ}"
+    "DefaultConnection": "Host=localhost;Port=5432;Database=phone_db;Username=postgres;Password=YOUR_PASSWORD"
   }
-
 }
 
-JobParser appsettings.json
-
-JSON
-
+JobParser
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Port=5432;Database=jobparser_db;Username=postgres;Password={ТВОЙ_ПАРОЛЬ}"
+    "DefaultConnection": "Host=localhost;Port=5432;Database=jobparser_db;Username=postgres;Password=YOUR_PASSWORD"
   },
   "ParserSettings": {
     "ExclusionsFilePath": "exclusions.txt",
     "OutputFolder": "out",
     "MaxPagesToScan": 10,
-    "DelayBetweenRequests": 1500,
+    "DelayBetweenRequests": 1000,
     "MaxLeadsPerSite": 100,
     "CategoriesPerRun": 5,
     "UseExternalPhoneApi": true,
-    "PhoneCheckApiUrl": "https://localhost:7249/PhoneNumber/check_number",
+    "PhoneCheckApiUrl": "http://localhost:7249/PhoneNumber/check_number",
     "UseSeleniumForAmountWork": true
-},
-
+  },
   "Quartz": {
     "CronSchedule": "0 0 */6 * * ?"
   }
 }
 
-Параметры:
+Запуск
 
-MaxPagesToScan — количество страниц за один запуск (10)
-
-DelayBetweenRequests — задержка между запросами в миллисекундах (1500)
-
-MaxLeadsPerSite — максимум лидов с одного сайта (100, 0 = без лимита)
-
-CategoriesPerRun — количество категорий Layboard за запуск (5)
-
-UseSeleniumForAmountWork — использовать Selenium для AmountWork (true)
-
-UseExternalPhoneApi — проверять телефоны через API (true)
-
-PhoneCheckApiUrl — URL API проверки телефонов
-
-Запуск и проверка
-
-Шаг 1. Поднять PostgreSQL
-
-Создайте базы phone_db и jobparser_db (или используйте существующие).
-
-SQL
+1. Создать базы
 
 CREATE DATABASE phone_db;
 
 CREATE DATABASE jobparser_db;
 
-Шаг 2. Применить миграции
-
-В проекте JobParser выполните:
-
-Bash
+2. Миграции
 
 dotnet ef migrations add InitialCreate
 
 dotnet ef database update
 
-Шаг 3. Создать файл exclusions.txt
-
-В корне проекта создайте файл со словами-исключениями (по одному на строку):
-
-text
-
-# Слова-исключения (каждое с новой строки)
-
-# Строки, начинающиеся с # — комментарии
+3. exclusions.txt
 
 scam
 
@@ -291,158 +219,77 @@ fraud
 
 spam
 
-Шаг 4. Запустить PhoneNumberApi
+4. Запуск API
 
-Запустите API проверки телефонов. Убедитесь, что он доступен по адресу из PhoneCheckApiUrl.
+Запусти PhoneNumberApi
 
-Шаг 5. Запустить JobParser
-
-Bash
+5. Запуск парсера
 
 dotnet run
 
-Откройте Swagger (http://localhost:5000/swagger) и выполните:
+Swagger:
 
-text
-
-POST /api/parser/run
+http://localhost:5000/swagger
 
 Результат
 
-В папке out появится CSV файл с результатами обоих сайтов:
-
-text
-
+CSV
 out/
+└── 2026.01.15_21.02_leads.csv
 
-└── [2026.04.11_21.02]_leads.csv
+Title,Description,PhoneNumbers,Email,Location,Source,Region,ParsedAt
 
-Формат CSV:
-
-text
-
-Title,Phones,Email,Location,Source,ParsedAt
-
-Водитель CDL,+1234567890,test@example.com,Чикаго,AmountWork,2025-01-15T20:45:00Z
-
-Водитель дальнобой,+1987654321,driver@mail.com,Майами,Layboard,2025-01-15T20:46:00Z
-
-В логах будет статистика:
-
-text
-
+Логи
 logs/
+└── parser-YYYYMMDD.log
 
-└── parser-20260411.log
+API эндпоинты
 
-Содержимое лог-файла:
+GET  /                  - информация
 
-text
+POST /api/parser/run    - запуск
 
-20:45:37 [INF] Database ready. Phones: 0, Processed URLs: 395
+GET  /api/stats         - статистика
 
-20:45:47 [INF] Запуск парсинга
-
-20:45:47 [INF] Парсер: AmountWork
-
-20:45:50 [INF] Начало парсинга AmountWork. Страницы 1-10
-
-20:46:15 [INF] Найдено ссылок: 98, новых: 12
-
-20:48:23 [INF] [1] Водитель CDL | Phones: 2 | Email: test@mail.com | Loc: Чикаго
-
-20:50:45 [INF] Завершено AmountWork. Лидов: 12
-
-Для каждого дня создается отдельный лог-файл с датой в названии.
-
-Эндпоинты JobParser
-text
-
-GET  /                  - Информация о сервисе
-
-POST /api/parser/run    - Ручной запуск парсинга
-
-GET  /api/stats         - Статистика по телефонам
-
-GET  /swagger           - Swagger UI документация
+GET  /swagger           - документация
 
 Планировщик (Quartz)
-
-Quartz уже подключен. Расписание задается в appsettings.json:
-
-JSON
 
 "Quartz": {
   "CronSchedule": "0 0 */6 * * ?"
 }
 
-По умолчанию запуск каждые 6 часов.
+Примеры:
 
-Примеры расписаний:
+Каждый час -> 0 0 * * * ?
 
-Каждый час: 0 0 * * * ?
+Каждые 12 часов -> 0 0 */12 * * ?
 
-Каждые 12 часов: 0 0 */12 * * ?
-
-Каждый день в 9:00: 0 0 9 * * ?
-
-Файл exclusions.txt
-
-Содержит слова/фразы, при наличии которых в Title или Description объявление исключается.
-
-Пример:
-
-text
-
-# Слова-исключения (каждое с новой строки)
-
-# Строки, начинающиеся с # — комментарии
-
-scam
-
-мошенничество
-
-обман
-
-fraud
-
-spam
+Каждый день в 9 -> 0 0 9 * * ?
 
 Типовые проблемы
 
-AmountWork возвращает 500 при HttpClient
+AmountWork 500 ошибка
 
-Это нормально: сайт блокирует обычные запросы. Используйте Selenium (UseSeleniumForAmountWork=true).
+Это нормально → нужен Selenium
 
-Selenium работает медленно
+Ничего не парсится
 
-Это ожидаемо. Ускорение достигается уменьшением DelayBetweenRequests, но слишком маленькая задержка может привести к блокировкам.
+Причины:
 
-Второй запуск ничего не находит
+номера уже есть в phone_db
 
-Это ожидаемо, если:
+URL уже есть в processed_leads
 
-Телефоны уже записаны в phone_db (PhoneNumberApi), поэтому все объявления становятся дубликатами
-
-URL уже записаны в processed_leads (JobParser), поэтому страницы повторно не обрабатываются
-
-Парсер автоматически продолжит со следующих страниц благодаря таблице parser_progress.
-
-Таблица parser_progress не существует
-
-Выполните миграцию:
-
-Bash
+Нет parser_progress
 
 dotnet ef migrations add AddParserProgress
 
 dotnet ef database update
 
-Логи не выводятся в консоль
+Нет логов
 
-Проверьте что в appsettings.json установлен правильный уровень логирования:
-
-JSON
+Проверь уровень:
 
 "Serilog": {
   "MinimumLevel": {
@@ -450,30 +297,22 @@ JSON
   }
 }
 
-Логирование
+Архитектура
 
-Логи сохраняются в папку logs с ежедневным созданием нового файла:
+ParserHelper — утилиты
 
-text
+ProgressRepository — прогресс
 
-logs/
+ProcessedUrlsRepository — дедупликация
 
-├── parser-20260409.log
+HtmlParserService — парсинг HTML
 
-├── parser-20260410.log
+PhoneCheckerService — проверка телефонов
 
-├── parser-20260411.log
+AmountWork / Layboard — парсеры
 
-└── parser-20260412.log
+Валидация телефонов
 
-Формат лога:
+Валидация выполняется только в PhoneNumberApi.
 
-text
-
-20:45:37 [INF] Database ready. Phones: 1523, Processed URLs: 3456
-
-20:45:47 [INF] Запуск парсинга
-
-20:45:47 [INF] Парсер: AmountWork
-
-20:45:50 [INF] Начало парсинга AmountWork. Страницы 1-10
+JobParser только извлекает и отправляет номера.
