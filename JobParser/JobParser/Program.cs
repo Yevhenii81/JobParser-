@@ -219,25 +219,5 @@ app.MapGet("/api/stats", async (AppDbContext context) =>
 .WithName("GetStats")
 .WithTags("Stats");
 
-app.MapGet("/api/progress", async (AppDbContext context) =>
-{
-    var progress = await context.ParserProgress
-        .Select(p => new
-        {
-            p.Source,
-            p.LastProcessedPage,
-            p.UpdatedAt
-        })
-        .ToListAsync();
-
-    return Results.Ok(new
-    {
-        progress,
-        timestamp = DateTime.UtcNow
-    });
-})
-.WithName("GetProgress")
-.WithTags("Stats");
-
-Log.Information("JobParser запущен");
+Log.Information("JobParser v2.0 started");
 app.Run();
